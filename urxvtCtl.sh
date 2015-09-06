@@ -1,5 +1,12 @@
 #!/bin/sh
 
+getWinid ()
+{
+    winid_hex=`xwininfo -root -children | grep urxvt | awk '{ print $1; }' | head -n1`
+    winid_dec=`printf "%d\n" ${winid_hex}`
+    echo "${winid_dec}"
+}
+
 for i in "$@"
 do
     case $i in
@@ -25,14 +32,12 @@ do
     esac
 done
 
-echo "${tab_name}"
-echo "${tab_active_name}"
-echo "${exec_cmd_line}"
-
-winid_hex=`xwininfo -root -children | grep urxvt | awk '{ print $1; }' | head -n1`
-echo ${winid_hex}
-winid_dec=`printf "%d\n" ${winid_hex}`
-echo ${winid_dec}
+winid_dec="$(getWinid)"
+echo "${winid_dec}"
+if [ "${winid_dec}" = "0" ]; then
+    urxvt
+    exit 0
+fi
 
 cmd_line="dbus-send --session --print-reply --dest=org.schmorp.urxvt /term/${winid_dec}/control "
 
@@ -46,5 +51,5 @@ if [ -n "${exec_cmd_line}" ]; then
     eval "${cmd_line} org.schmorp.urxvt.execCmd string:\"${exec_cmd_line}\""
 fi
 if [ -n "${foreground}" ]; then
-    true
+    xdotool windowactivate ${winid_dec}
 fi
