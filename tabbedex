@@ -114,7 +114,7 @@ our $service            = $bus->export_service("org.schmorp.urxvt")  ;
 
 #Called every time the terminal is updated
 sub refresh {
-   my ($self) = @_;
+    my ($self) = @_;
    $self->want_refresh;
 }
 
@@ -147,7 +147,6 @@ sub tab_activity_mark ($$) {
    }
    '*';
 }
-
 
 sub refresh {
    my ($self) = @_;
@@ -377,6 +376,14 @@ sub on_button_release {
    }
 
    ();
+}
+
+sub on_tt_write {
+    my ($self, $str) = @_;
+
+    $self->{cur}->tt_write ($str);
+
+    1
 }
 
 sub on_init {
@@ -711,30 +718,6 @@ package urxvt::ext::tabbedex::tab;
    }
 }
 
-package urxvt::ext::dbus::tab;
-
-# helper extension implementing the subwindows of a dbus terminal.
-# simply proxies all interesting calls back to the dbus class.
-
-{
-   for my $hook (qw(start destroy key_press property_notify)) {
-      eval qq{
-         sub on_$hook {
-            my \$parent = \$_[0]{term}{parent}
-               or return;
-            \$parent->tab_$hook (\@_)
-         }
-      };
-      die if $@;
-   }
-}
-
-sub on_add_lines {
-  $_[0]->{activity}++
-     or $_[0]{term}{parent}->tab_activity ($_[0]);
-  ()
-}
-
 package ByPid;
 
 use base qw(Net::DBus::Object);
@@ -763,6 +746,40 @@ sub new {
     return $self;
 }
 
+dbus_method("addOrActivateTabByName", ["string"], ["int32"]);
+sub addOrActivateTabByName {
+    my $self = shift;
+    my $tabName = shift;
+    my $term = $self->{term};
+    
+    for my $tab (@{ $term->{tabs} }) {
+	my $idx = $tab->{index};
+	my $name = $tab->{name} ? $tab->{name} : $idx;
+	if ($name eq $tabName) {
+	    $term->make_current($tab);
+	    return $idx;
+	} 
+    }
+
+    $self->add_tab_with_name($tabName);
+    
+    return -1;
+}
+
+dbus_method("addTabWithName", ["string"], ["int32"]);
+sub addTabWithName {
+    my $self = shift;
+    my $tabName = shift;
+    my $term = $self->{term};
+    
+    $term->new_tab();
+    my $newTab = $term->{cur};
+    $newTab->{name} = $tabName;
+    
+    $term->update_autohide (1);
+    $term->refresh;    
+}
+
 dbus_method("addTab", [], ["int32"]);
 sub addTab {
     my $self    = shift;
@@ -770,6 +787,24 @@ sub addTab {
     $self->{term}->new_tab();
     return 20000;
 }
+
+
+dbus_method("execCmd", ["string"], ["int32"]);
+sub execCmd {
+    my $self = shift;
+    my $cmd = shift;
+    my $term = $self->{term};
+    $term->new_tab();
+    my $newTab = $term->{cur};
+    $newTab->{name} = "run_cmd";
+    $term->update_autohide (1);
+    $term->refresh;    
+
+    $term->tt_write($cmd."\n");
+
+    return 0;
+}
+
 
 dbus_method("selectTab", [], ["int32"]);
 sub selectTab {
