@@ -35,7 +35,7 @@ done
 winid_dec="$(getWinid)"
 echo "${winid_dec}"
 if [ "${winid_dec}" = "0" ]; then
-    urxvt
+    urxvtcd
     exit 0
 fi
 

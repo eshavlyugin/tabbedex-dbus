@@ -109,8 +109,9 @@ use strict;
 
 
 #Variables shared between all term (could use 'my', but 'our' for clarity)
-our $bus                = Net::DBus->session()                       ;
+our $bus                = Net::DBus->session()        ;
 our $service            = $bus->export_service("org.schmorp.urxvt")  ;
+our $connection         = $bus->get_connection()                     ;
 
 #Called every time the terminal is updated
 sub refresh {
@@ -242,10 +243,6 @@ sub new_tab {
       -embed => $self->parent,
        @argv;
 
-   $self->{tab_count}  += 1;
-   #$realTerm->exec_async("notify-send","salut ".$self->{tab_count}.$self);
-   $self->{dbusTabByIndex}[$self->{tab_count}]  = UrxvtTab->new($service,$realTerm->parent,$self,$self->{tab_count},$term->parent);
-   $self->{dbusTabById}[$self->{tab_count}] = UrxvtTerm->new($service,$realTerm->parent,$self,$self->{tab_count},$term->parent);
 }
 
 
@@ -454,10 +451,7 @@ sub on_start {
    my ($term) = @_;
    
    $self->{dbusParentTerm} = ByPid->new($service,$term->parent,$self);
-   $self->{tab_count} = 0;
-   $self->{dbusTabByIndex} = ();
-   $self->{dbusTabById} = ();
-
+   
    $self->{maxtabheight} = $self->int_bwidth + $self->fheight + $self->lineSpace;
    $self->{tabheight} = $self->{autohide} ? 0 : $self->{maxtabheight};
 
@@ -509,11 +503,11 @@ sub on_user_command {
 
 
 sub on_wm_delete_window {
-   my ($self) = @_;
-   $_->destroy for @{ $self->{tabs} };
-   1;
+    my ($self) = @_;
+    $connection->unregister_object_path($self->{dbusParentTerm}->{objPath});
+    $_->destroy for @{ $self->{tabs} };
+    1;
 }
-
 
 sub tab_start {
    my ($self, $tab) = @_;
@@ -737,11 +731,13 @@ dbus_signal("titleChanged",   ["string"]); #Arg=new title
 sub new {
     my $class   = shift;
     my $service = shift;
-    my $self    = $class->SUPER::new($service, "/term/".shift."/control");
+    my $objPath = "/term/".shift."/control";
+    my $self    = $class->SUPER::new($service, $objPath);
     my $parent  = shift;
     bless $self, $class;
     
     $self->{term} = $parent;
+    $self->{objPath} = $objPath;
     
     return $self;
 }
@@ -823,132 +819,6 @@ sub emitContentChanged {
 
     $self->emit_signal("contentChanged", "$index");
     return "done";
-}
-
-
-package UrxvtTab;
-use base qw(Net::DBus::Object);
-use Net::DBus::Exporter qw(org.schmorp.urxvt);
-
-#Signals
-dbus_signal("colorChanged", ["string"]); #Arg=the tab color
-
-sub new {
-    my $class   = shift;
-    my $service = shift;
-    my $winId   = shift;
-    my $parent  = shift;
-    my $idx     = shift;
-    my $tabWinId= shift;
-    
-    my $self = $class->SUPER::new($service, "/term/".$winId."/tab/".$idx);
-    
-    bless $self, $class;
-    
-    $self->{term} = $parent;
-    
-    return $self;
-}
-
-dbus_method("closeTab", ["int32"], [["array", "string"]]);
-sub closeTab {
-    my $self    = shift;
-    my $message = shift;
-    $self->{term}->tab_destroy();
-    return ["Hello", " from example-service.pl"];
-}
-
-
-dbus_method("getTitle", [], ["string"]);
-sub getTitle {
-    my $self    = shift;
-    my $message = shift;
-    return $self->{term}->resource("name");
-}
-
-package UrxvtTerm;
-use base qw(Net::DBus::Object);
-use Net::DBus::Exporter qw(org.schmorp.urxvt);
-our %termData = {};
-
-#Signals
-dbus_signal("colorChanged", [["array", "string"]]); #Arg=the tab color
-
-sub color {
-    my $self = shift;
-    $self->{color} = shift if @_;
-    return $self->{color};
-}
-dbus_property("color",   "string",  "readwrite");
-
-sub index {
-    my $self = shift;
-    return $self->{index};
-}
-dbus_property("index",   "string",  "read");
-
-sub windowId {
-    my $self = shift;
-    return $self->{winId};
-}
-dbus_property("windowId",   "string",  "read");
-
-sub tabWindowId {
-    my $self = shift;
-    return $self->{tabWinId};
-}
-dbus_property("tabWindowId",   "string",  "read");
-
-sub new {
-    my $class    = shift;
-    my $service  = shift;
-    my $winId    = shift;
-    my $parent   = shift;
-    my $idx      = shift;
-    my $tabWinId = shift;
-    
-    my $self = $class->SUPER::new($service, "/terms/".$tabWinId);
-
-    $self->{winId}    = $winId;
-    $self->{term}     = $parent;
-    $self->{index}    = $idx;
-    $self->{tabWinId} = $tabWinId;
-    
-    bless $self, $class;
-    
-    return $self;
-}
-
-dbus_method("closeTab", ["int32"], [["array", "string"]]);
-sub closeTab {
-    my $self    = shift;
-    my $message = shift;
-    $self->{term}->tab_destroy();
-    return ["Hello", " from example-service.pl"];
-}
-
-dbus_method("select", [], [["array", "string"]]);
-sub select {
-    my $self    = shift;
-    my $message = shift;
-    $self->{term}->make_current (@{$self->{term}->{tabs} }[$self->{index}-1]);
-    return ["Hello", " from example-service.pl"];
-}
-
-dbus_method("setColor", ["string"], ["string"]);
-sub setColor {
-    my $self    = shift;
-    my $color   = shift;
-    $self->{color} = $color;
-    $self->emit_signal("colorChanged", [$self->{winId}."",$self->{index}."","$color"]);
-    return "$color";
-}
-
-dbus_method("getTitle", [], ["string"]);
-sub getTitle {
-    my $self    = shift;
-    my $message = shift;
-    return $self->{term}->resource("name");
 }
 
 package main;
