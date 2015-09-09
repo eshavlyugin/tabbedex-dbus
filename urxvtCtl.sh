@@ -33,7 +33,6 @@ do
 done
 
 winid_dec="$(getWinid)"
-echo "${winid_dec}"
 if [ "${winid_dec}" = "0" ]; then
     urxvtcd
     exit 0
